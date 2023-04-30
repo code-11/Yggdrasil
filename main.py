@@ -1,3 +1,4 @@
+import math
 import random
 
 import pygame
@@ -23,12 +24,12 @@ tile_types = [
 ]
 
 class HexMap:
-    def __init__(self, hex_width, hex_height, terrain_map):
-        self.hex_height = hex_height
-        self.hex_width = hex_width
+    def __init__(self, tiles_width, tiles_height, terrain_map):
+        self.tiles_height = tiles_height
+        self.tiles_width = tiles_width
         self.hexes = []
-        for x in range(self.hex_width):
-            for y in range(self.hex_height):
+        for x in range(self.tiles_width):
+            for y in range(self.tiles_height):
                 adjust_up = 0 if x % 2 == 0 else 15
                 self.hexes.append(
                     Hex(
@@ -38,10 +39,39 @@ class HexMap:
                     )
                 )
 
+    def get_col(self, col_index):
+        return self.hexes[col_index * self.tiles_height:(col_index+1) * self.tiles_height]
+
+    def get_row(self, row_index):
+        return self.hexes[row_index:len(self.hexes):self.tiles_height]
+
+    def neighbors(self, hex_tile):
+        # hex_index = self.hexes.index(hex_tile)
+        pass
+
+    def closest_hex(self, pt):
+        pt_x, pt_y = pt
+        left_col_i, right_col_i = math.floor((pt_x)/ 22)-1, math.ceil((pt_x) / 22)-1
+        # You could do indexing by the row as well and set intersect them, but I'm too lazy to figure it out.
+        candidate_hexes = self.get_col(left_col_i) + self.get_col(right_col_i)
+        closest = min(candidate_hexes, key=lambda tile_hex: tile_hex.dist(pt))
+        return closest
+
 
 class Hex:
     rect_height = 30
     rect_width = 30
+
+    @property
+    def center_x(self):
+        return round(self.x + (Hex.rect_width / 2))
+
+    @property
+    def center_y(self):
+        return round(self.y + (Hex.rect_height / 2))
+
+    def dist(self, pt):
+        return math.hypot(pt[0]-self.center_x, pt[1]-self.center_y)
 
     def __init__(self, x, y, tile_type):
         self.x = x
@@ -51,19 +81,32 @@ class Hex:
         tile_subtype = random.randint(1, 5)
         self.image = pygame.transform.scale(pygame.image.load(hexes.path(tile_type, tile_subtype)), (Hex.rect_width, Hex.rect_height))
 
-camera_x = 0
-camera_y = 0
+    def draw_debug(self, surface, camera):
+        pygame.draw.circle(surface, (255, 0, 255), (self.center_x + camera.x, self.center_y + camera.y), 2)
 
-camera_vel_x = 0
-camera_vel_y = 0
 
-camera_acceleration = .1
-camera_deceleration = .2
+class Camera:
+    def __init__(self, max_speed):
+        self.max_speed = max_speed
+        self.x = 0
+        self.y = 0
 
-camera_max_speed = 4
+    def handle_movement(self, keys, map_hex_width, map_hex_height, hex_adj_width, hex_height, window_x, window_y):
+        if keys[K_a] and self.x + self.max_speed <= 0:
+            self.x += self.max_speed
+        if keys[K_d] and self.x - self.max_speed + (map_hex_width * (hex_adj_width + 1)) > window_x:
+            self.x -= self.max_speed
+        if keys[K_w] and self.y + self.max_speed <= 0:
+            self.y += self.max_speed
+        if keys[K_s] and self.y - self.max_speed + (map_hex_height * (hex_height + 3)) > window_y:
+            self.y -= self.max_speed
+
 
 terrain_map = read_terrain_map(r"C:\Users\brend\Documents\Yggdrasil\assets\terrain_maps\test.png",50,26)
 the_map = HexMap(50, 26, terrain_map)
+the_camera = Camera(max_speed=4)
+
+selected_hex=None
 
 while True:
     none_held = True
@@ -71,22 +114,28 @@ while True:
         if event.type == pygame.QUIT:
             pygame.quit()
             sys.exit()
+        if event.type == pygame.MOUSEBUTTONUP:
+            pos_x,pos_y = pygame.mouse.get_pos()
+            selected_hex = the_map.closest_hex((pos_x - the_camera.x, pos_y - the_camera.y))
+            print(selected_hex.type)
+
     keys = pygame.key.get_pressed()
-    if keys[K_a] and camera_x + camera_max_speed <= 0:
-        camera_x += camera_max_speed
-    if keys[K_d] and camera_x - camera_max_speed + (the_map.hex_width * (22 + 1)) > WINDOW_X:
-        camera_x -= camera_max_speed
-    if keys[K_w] and camera_y + camera_max_speed <= 0:
-        camera_y += camera_max_speed
-    if keys[K_s] and camera_y - camera_max_speed + (the_map.hex_height * (Hex.rect_height + 3)) >WINDOW_Y:
-        camera_y -= camera_max_speed
+
+    the_camera.handle_movement(
+        keys,
+        the_map.tiles_width,
+        the_map.tiles_height,
+        22,
+        Hex.rect_height,
+        WINDOW_X,
+        WINDOW_Y
+    )
 
     screen.fill((0, 0, 0))
-    for hex in the_map.hexes:
-        screen.blit(hex.image, (hex.x + camera_x, hex.y + camera_y))
-    print(f"camera_x: {camera_x}")
-    print(f"camera_y: {camera_y}")
-    print(f"x: {(the_map.hex_width * (22 + 1)) + camera_x > WINDOW_X}")
-    print(f"y: {(the_map.hex_height * (Hex.rect_height + 3)) + camera_y > WINDOW_Y}")
+    for hex_tile in the_map.hexes:
+        screen.blit(hex_tile.image, (hex_tile.x + the_camera.x, hex_tile.y + the_camera.y))
+
+    if selected_hex:
+        selected_hex.draw_debug(screen,the_camera)
 
     pygame.display.update()
