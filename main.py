@@ -23,11 +23,16 @@ tile_types = [
     "Mountains"
 ]
 
+mod_types =[
+    "Dirtroad"
+]
+
 class HexMap:
     def __init__(self, tiles_width, tiles_height, terrain_map):
         self.tiles_height = tiles_height
         self.tiles_width = tiles_width
         self.hexes = []
+        self.modifiers = []
         for x in range(self.tiles_width):
             for y in range(self.tiles_height):
                 adjust_up = 0 if x % 2 == 0 else 15
@@ -57,6 +62,37 @@ class HexMap:
         closest = min(candidate_hexes, key=lambda tile_hex: tile_hex.dist(pt))
         return closest
 
+    def add_modifier(self, modifier_name, x, y):
+        hex_con_indexes = [False] * 6
+        hex_con_indexes[0] = True
+        hex_con_indexes[3] = True
+        self.modifiers.append(Modifier(
+            x, y, modifier_name, hex_con_indexes
+        ))
+
+
+class Modifier:
+    def __init__(self, x, y, mod_type, hex_con_indexes):
+        self.x = x
+        self.y = y
+        self.type = mod_type
+        self.hex_con_indexes = hex_con_indexes
+        self.images = []
+
+        for i in range(6):
+            if self.hex_con_indexes[i]:
+                self.images.append(
+                    pygame.transform.rotate(
+                        pygame.transform.scale(pygame.image.load(hexes.modifier_path(mod_type)),
+                                                    (Hex.rect_width, Hex.rect_height)),
+                        -60*i
+                    )
+                )
+
+    def display(self, screen, camera):
+        for img in self.images:
+            screen.blit(img, (modifier.x + camera.x, modifier.y + camera.y))
+
 
 class Hex:
     rect_height = 30
@@ -69,6 +105,10 @@ class Hex:
     @property
     def center_y(self):
         return round(self.y + (Hex.rect_height / 2))
+
+    @property
+    def center(self):
+        return self.center_x,self.center_y
 
     def dist(self, pt):
         return math.hypot(pt[0]-self.center_x, pt[1]-self.center_y)
@@ -83,6 +123,20 @@ class Hex:
 
     def draw_debug(self, surface, camera):
         pygame.draw.circle(surface, (255, 0, 255), (self.center_x + camera.x, self.center_y + camera.y), 2)
+
+
+def iter_raycast(pt1,pt2,iter_dis=20):
+    pt1_x,pt1_y=pt1
+    pt2_x,pt2_y=pt2
+    displacement_vector=(pt2_x-pt1_x), (pt2_y-pt1_y)
+    distance=math.hypot((pt2_x-pt1_x), (pt2_y-pt1_y))
+    normed_vector=displacement_vector[0]/distance, displacement_vector[1]/distance
+    to_return=[]
+    for cur_dis in range(0,math.ceil(distance),iter_dis):
+        vec_x, vec_y = normed_vector
+        cur_pos = pt1_x + (vec_x * cur_dis), pt1_y + (vec_y * cur_dis)
+        to_return.append(cur_pos)
+    return to_return
 
 
 class Camera:
@@ -102,11 +156,11 @@ class Camera:
             self.y -= self.max_speed
 
 
-terrain_map = read_terrain_map(r"C:\Users\brend\Documents\Yggdrasil\assets\terrain_maps\test.png",50,26)
+terrain_map = read_terrain_map(r"C:\Users\brend\Documents\Yggdrasil\assets\terrain_maps\test.png", 50, 26)
 the_map = HexMap(50, 26, terrain_map)
 the_camera = Camera(max_speed=4)
 
-selected_hex=None
+selected_hexes = []
 
 while True:
     none_held = True
@@ -115,11 +169,31 @@ while True:
             pygame.quit()
             sys.exit()
         if event.type == pygame.MOUSEBUTTONUP:
-            pos_x,pos_y = pygame.mouse.get_pos()
-            selected_hex = the_map.closest_hex((pos_x - the_camera.x, pos_y - the_camera.y))
-            print(selected_hex.type)
+            pos_x, pos_y = pygame.mouse.get_pos()
+            selected_hexes.append(the_map.closest_hex((pos_x - the_camera.x, pos_y - the_camera.y)))
+            # the_map.add_modifier("Dirtroad", selected_hex.x, selected_hex.y)
+        if event.type == pygame.KEYDOWN:
+            if event.key == pygame.K_RETURN:
+                finalized_selected_hexes = []
+                seen_hexes = set()
+                for prev_hex, cur_hex in zip(selected_hexes, selected_hexes[1:]):
+                    if prev_hex not in seen_hexes:
+                        finalized_selected_hexes.append(prev_hex)
+                        seen_hexes.add(prev_hex)
+                    iter_pts = iter_raycast(prev_hex.center, cur_hex.center)
+                    for iter_pt in iter_pts:
+                        intermediate_hex = the_map.closest_hex((iter_pt[0] - the_camera.x, iter_pt[1] - the_camera.y))
+                        if intermediate_hex not in seen_hexes:
+                            finalized_selected_hexes.append(intermediate_hex)
+                            seen_hexes.add(intermediate_hex)
+                    if cur_hex not in seen_hexes:
+                        finalized_selected_hexes.append(cur_hex)
+                        seen_hexes.add(cur_hex)
+                selected_hexes = finalized_selected_hexes
+
 
     keys = pygame.key.get_pressed()
+
 
     the_camera.handle_movement(
         keys,
@@ -134,8 +208,10 @@ while True:
     screen.fill((0, 0, 0))
     for hex_tile in the_map.hexes:
         screen.blit(hex_tile.image, (hex_tile.x + the_camera.x, hex_tile.y + the_camera.y))
+    for modifier in the_map.modifiers:
+        modifier.display(screen, the_camera)
 
-    if selected_hex:
-        selected_hex.draw_debug(screen,the_camera)
+    for hex_tile in selected_hexes:
+        hex_tile.draw_debug(screen, the_camera)
 
     pygame.display.update()
